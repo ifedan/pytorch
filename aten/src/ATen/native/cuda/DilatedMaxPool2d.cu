@@ -174,27 +174,30 @@ void max_pool2d_with_indices_out_cuda_template(
   const auto memory_format = input_.suggest_memory_format();
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
+  /*const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
   const int64_t size2 = input_.size(-2); // inputHeight or inputWidth
-  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane
+  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane*/
 
-  int64_t stride1;
-  int64_t stride2;
-  int64_t stride3;
+  int64_t nInputPlane;
   int64_t inputWidth;
   int64_t inputHeight;
+  int64_t in_stride_c;
+  int64_t in_stride_h;
+  int64_t in_stride_w;
   if (memory_format == MemoryFormat::ChannelsLast) {
-    stride1 = 1; // channels stride
-    stride2 = size1; // width stride = channels size
-    stride3 = size2 * size1; // height stride = channels * width
-    inputWidth = size2;
-    inputHeight = size3;
+    inputHeight = input_.size(-3);
+    inputWidth = input_.size(-2);
+    nInputPlane = input_.size(-1);
+    in_stride_c = 1;
+    in_stride_h = inputWidth * nInputPlane;
+    in_stride_w = nInputPlane;
   } else {
-    stride1 = size2 * size1; // channel stride = height * width
-    stride2 = size1; // height stride = width
-    stride3 = 1; // width stride
-    inputWidth = size1;
-    inputHeight = size2;
+    nInputPlane = input_.size(-3);
+    inputHeight = input_.size(-2);
+    inputWidth = input_.size(-1);
+    in_stride_c = inputHeight * inputWidth;
+    in_stride_h = inputWidth;
+    in_stride_w = 1;
   }
 
   const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
@@ -203,18 +206,18 @@ void max_pool2d_with_indices_out_cuda_template(
   pool2d_shape_check(
     input_,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    size3,
-    size2, size1,
+    nInputPlane,
+    inputHeight, inputWidth,
     outputHeight, outputWidth);
 
   Tensor input = input_.contiguous(memory_format);
 
   if (memory_format == MemoryFormat::ChannelsLast) {
-    output.resize_({nbatch, outputHeight, outputWidth, size1});
-    indices.resize_({nbatch, outputHeight, outputWidth, size1});
+    output.resize_({nbatch, outputHeight, outputWidth, nInputPlane});
+    indices.resize_({nbatch, outputHeight, outputWidth, nInputPlane});
   } else {
-    output.resize_({nbatch, size3, outputHeight, outputWidth});
-    indices.resize_({nbatch, size3, outputHeight, outputWidth});
+    output.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
+    indices.resize_({nbatch, nInputPlane, outputHeight, outputWidth});
   }
 
   const int count = safe_downcast<int, int64_t>(output.numel());
@@ -233,9 +236,9 @@ void max_pool2d_with_indices_out_cuda_template(
       MaxPoolForward<scalar_t, scalar_t>
         <<<cuda::ATenCeilDiv(count, num_threads), num_threads, 0, at::cuda::getCurrentCUDAStream()>>>(
           count, input_data,
-          nbatch, size3, size2, size1, outputHeight, outputWidth,
+          nbatch, nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
           kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          stride1, stride2, stride3,
+          in_stride_c, in_stride_h, in_stride_w,
           output_data, indices_data); }
   );
 
@@ -245,9 +248,9 @@ void max_pool2d_with_indices_out_cuda_template(
 
   if(input.ndimension() == 3) {
     if (memory_format == MemoryFormat::ChannelsLast) {
-      output.resize_({outputHeight, outputWidth, size1});
+      output.resize_({outputHeight, outputWidth, nInputPlane});
     } else {
-      output.resize_({size3, outputHeight, outputWidth});
+      output.resize_({nInputPlane, outputHeight, outputWidth});
     }
   }
 }
@@ -298,36 +301,46 @@ void max_pool2d_with_indices_backward_out_cuda_template(
   const Tensor input = input_.contiguous(memory_format);
 
   const int64_t nbatch = input_.ndimension() == 4 ? input_.size(-4) : 1;
-  const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
+  /*const int64_t size3 = input_.size(-3); // nInputPlane or inputHeight
   const int64_t size2 = input_.size(-2); // inputHeight or inputWidth
-  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane
+  const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane*/
 
-  int64_t i_stride3;
-  int64_t i_stride2;
-  int64_t i_stride1;
-  int64_t outputHeight;
-  int64_t outputWidth;
-  int64_t o_stride3;
-  int64_t o_stride2;
-  int64_t o_stride1;
-  if (memory_format == MemoryFormat::ChannelsLast)  {
-    i_stride1 = 1; // channels stride
-    i_stride2 = size1; // width stride = channels size
-    i_stride3 = size2 * size1; // height stride = channels * width
-    outputHeight = pooling_output_shape<int64_t>(size3, kH, padH, dH, dilationH, ceil_mode);
-    outputWidth = pooling_output_shape<int64_t>(size2, kW, padW, dW, dilationW, ceil_mode);
-    o_stride1 = 1;
-    o_stride2 = outputWidth;
-    o_stride3 = outputHeight * outputWidth;
+  int64_t nInputPlane;
+  int64_t inputWidth;
+  int64_t inputHeight;
+  int64_t in_stride_c;
+  int64_t in_stride_h;
+  int64_t in_stride_w;
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    inputHeight = input_.size(-3);
+    inputWidth = input_.size(-2);
+    nInputPlane = input_.size(-1);
+    in_stride_h = inputWidth * nInputPlane;
+    in_stride_w = nInputPlane;
+    in_stride_c = 1;
   } else {
-    i_stride1 = size2 * size1; // channel stride = height * width
-    i_stride2 = size1; // height stride = width
-    i_stride3 = 1; // width stride
-    outputHeight = pooling_output_shape<int64_t>(size2, kH, padH, dH, dilationH, ceil_mode);
-    outputWidth = pooling_output_shape<int64_t>(size1, kW, padW, dW, dilationW, ceil_mode);
-    o_stride1 = outputHeight * outputWidth;
-    o_stride2 = outputWidth;
-    o_stride3 = 1;
+    nInputPlane = input_.size(-3);
+    inputHeight = input_.size(-2);
+    inputWidth = input_.size(-1);
+    in_stride_c = inputHeight * inputWidth;
+    in_stride_h = inputWidth;
+    in_stride_w = 1;
+  }
+
+  const int64_t outputHeight = pooling_output_shape<int64_t>(inputHeight, kH, padH, dH, dilationH, ceil_mode);
+  const int64_t outputWidth = pooling_output_shape<int64_t>(inputWidth, kW, padW, dW, dilationW, ceil_mode);
+
+  int64_t out_stride_c;
+  int64_t out_stride_h;
+  int64_t out_stride_w;
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    out_stride_h = nInputPlane * outputWidth;
+    out_stride_w = nInputPlane;
+    out_stride_c = 1;
+  } else {
+    out_stride_c = outputHeight * outputWidth;
+    out_stride_h = outputWidth;
+    out_stride_w  = 1;
   }
 
   max_pool2d_backward_shape_check(
@@ -336,8 +349,8 @@ void max_pool2d_with_indices_backward_out_cuda_template(
     indices,
     nbatch,
     kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-    size3,
-    size2, size1,
+    nInputPlane,
+    inputHeight, inputWidth,
     outputHeight, outputWidth,
     /*cuda=*/ true);
 
@@ -346,11 +359,11 @@ void max_pool2d_with_indices_backward_out_cuda_template(
 
   int64_t count = input.numel();
   dim3 grid;
-  int imgcount = size2 * size1;
+  int imgcount = inputHeight * inputWidth;
   const int blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
   grid.x = blocks;
   grid.y = nbatch;
-  grid.z = size3;
+  grid.z = nInputPlane;
   uint64_t maxGridY = at::cuda::getCurrentDeviceProperties()->maxGridSize[1];
   uint64_t maxGridZ = at::cuda::getCurrentDeviceProperties()->maxGridSize[2];
   if (maxGridY < grid.y) grid.y = maxGridY;
@@ -371,10 +384,10 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           gradOutput_data,
           indices_data,
           nbatch,
-          size3, size2, size1, outputHeight, outputWidth,
+          nInputPlane, inputHeight, inputWidth, outputHeight, outputWidth,
           kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          o_stride1, o_stride2, o_stride3,
-          i_stride1, i_stride2, i_stride3,
+          out_stride_c, out_stride_h, out_stride_w,
+          in_stride_c, in_stride_h, in_stride_w,
           gradInput_data);
     }
   );
