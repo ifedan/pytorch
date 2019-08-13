@@ -178,12 +178,12 @@ void max_pool2d_with_indices_out_cuda_template(
   const int64_t size2 = input_.size(-2); // inputHeight or inputWidth
   const int64_t size1 = input_.size(-1); // inputWidth or nInputPlane
 
-  int64_t stride3;
-  int64_t stride2;
   int64_t stride1;
+  int64_t stride2;
+  int64_t stride3;
   int64_t inputWidth;
   int64_t inputHeight;
-  if (memory_format == MemoryFormat::ChannelsLast)  {
+  if (memory_format == MemoryFormat::ChannelsLast) {
     stride1 = 1; // channels stride
     stride2 = size1; // width stride = channels size
     stride3 = size2 * size1; // height stride = channels * width
@@ -209,8 +209,13 @@ void max_pool2d_with_indices_out_cuda_template(
 
   Tensor input = input_.contiguous(memory_format);
 
-  output.resize_({nbatch, size3, size2, size1});
-  indices.resize_({nbatch, size3, size2, size1});
+  if (memory_format == MemoryFormat::ChannelsLast) {
+    output.resize_({nbatch, outputHeight, outputWidth, size1});
+    indices.resize_({nbatch, outputHeight, outputWidth, size1});
+  } else {
+    output.resize_({nbatch, size3, outputHeight, outputWidth});
+    indices.resize_({nbatch, size3, outputHeight, outputWidth});
+  }
 
   const int count = safe_downcast<int, int64_t>(output.numel());
   const int num_threads = std::min(at::cuda::getCurrentDeviceProperties()->maxThreadsPerBlock,
@@ -230,7 +235,7 @@ void max_pool2d_with_indices_out_cuda_template(
           count, input_data,
           nbatch, size3, size2, size1, outputHeight, outputWidth,
           kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          stride3, stride2, stride1,
+          stride1, stride2, stride3,
           output_data, indices_data); }
   );
 
@@ -239,7 +244,11 @@ void max_pool2d_with_indices_out_cuda_template(
      cudaGetLastError());
 
   if(input.ndimension() == 3) {
-    output.resize_({size3, size2, size1});
+    if (memory_format == MemoryFormat::ChannelsLast) {
+      output.resize_({outputHeight, outputWidth, size1});
+    } else {
+      output.resize_({size3, outputHeight, outputWidth});
+    }
   }
 }
 
@@ -364,8 +373,8 @@ void max_pool2d_with_indices_backward_out_cuda_template(
           nbatch,
           size3, size2, size1, outputHeight, outputWidth,
           kH, kW, dH, dW, padH, padW, dilationH, dilationW,
-          o_stride3, o_stride2, o_stride1,
-          i_stride3, i_stride2, i_stride1,
+          o_stride1, o_stride2, o_stride3,
+          i_stride1, i_stride2, i_stride3,
           gradInput_data);
     }
   );
