@@ -21,7 +21,7 @@ __device__ inline int min(int a, int b) {
 // kernels borrowed from Caffe
 template <typename scalar_t, typename accscalar_t>
 __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
-    const int num, const int depth, const int height,
+    const int num, const int channels, const int height,
     const int width, const int pooled_height, const int pooled_width,
     const int kernel_h, const int kernel_w, const int stride_h,
     const int stride_w, const int pad_h, const int pad_w,
@@ -31,8 +31,8 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
   CUDA_KERNEL_LOOP(index, nthreads) {
     int pw = index % pooled_width;
     int ph = (index / pooled_width) % pooled_height;
-    int c = (index / pooled_width / pooled_height) % depth;
-    int n = index / pooled_width / pooled_height / depth;
+    int c = (index / pooled_width / pooled_height) % channels;
+    int n = index / pooled_width / pooled_height / channels;
     int hstart = ph * stride_h - pad_h;
     int wstart = pw * stride_w - pad_w;
     int hend = min(hstart + (kernel_h - 1) * dilation_h + 1, height);
@@ -43,7 +43,7 @@ __global__ void MaxPoolForward(const int nthreads, const scalar_t* bottom_data,
       wstart += dilation_w;
     accscalar_t maxval = at::numeric_limits<accscalar_t>::lower_bound(); // -Infinity
     int maxidx = hstart * in_stride_h + wstart * in_stride_w;
-    bottom_data += (n * depth * height * width + c * in_stride_c);
+    bottom_data += (n * channels * height * width + c * in_stride_c);
     for (int h = hstart; h < hend; h += dilation_h) {
       for (int w = wstart; w < wend; w += dilation_w) {
         scalar_t val = bottom_data[h * in_stride_h + w * in_stride_w];
@@ -67,7 +67,7 @@ C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 4)
 C10_LAUNCH_BOUNDS_2(BACKWARD_THREADS, 8)
 #endif
 __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
-    const int64_t* top_mask, const int num, const int depth,
+    const int64_t* top_mask, const int num, const int channels,
     const int height, const int width, const int pooled_height,
     const int pooled_width, const int kernel_h, const int kernel_w,
     const int stride_h, const int stride_w, const int pad_h, const int pad_w,
@@ -107,10 +107,10 @@ __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
         pwend = min((w + pad_w) / stride_w + 1, pooled_width);
     }
     for (int n = blockIdx.y; n < num; n += gridDim.y)
-       for (int c = blockIdx.z; c < depth; c+= gridDim.z) {
+       for (int c = blockIdx.z; c < channels; c+= gridDim.z) {
 
         accscalar_t gradient = accscalar_t(0);
-        int offset = (n * depth * pooled_height * pooled_width + c * out_stride_c);
+        int offset = (n * channels * pooled_height * pooled_width + c * out_stride_c);
         top_diff += offset;
         top_mask += offset;
 //get some templating performance benefits without actually templating
@@ -127,7 +127,7 @@ __global__ void MaxPoolBackward(const int nthreads, const scalar_t* top_diff,
               gradient += ScalarConvert<scalar_t, accscalar_t>::to(top_diff[phstart * out_stride_h + pwstart * out_stride_w]);
             }
         }
-        bottom_diff[n*depth*height*width + c * in_stride_c + h * in_stride_h + w * in_stride_w] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
+        bottom_diff[n*channels*height*width + c * in_stride_c + h * in_stride_h + w * in_stride_w] = ScalarConvert<accscalar_t, scalar_t>::to(gradient);
       }
   }
 }
