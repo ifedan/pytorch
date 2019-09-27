@@ -141,7 +141,6 @@ void gt_kernel(TensorIterator& iter) {
 
 } // anonymous namespace
 
-
 REGISTER_DISPATCH(add_stub, &add_kernel);
 REGISTER_DISPATCH(sub_stub, &sub_kernel);
 REGISTER_DISPATCH(mul_stub, &mul_kernel);
